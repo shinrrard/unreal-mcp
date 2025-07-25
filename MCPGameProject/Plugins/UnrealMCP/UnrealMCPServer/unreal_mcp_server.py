@@ -9,8 +9,9 @@ import socket
 import sys
 import json
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, Optional
+from typing import AsyncIterator, Dict, Any, Optional, Union
 from mcp.server.fastmcp import FastMCP
+from commands.base_command import BaseCommand
 
 # Configure logging with more detailed format
 logging.basicConfig(
@@ -199,6 +200,95 @@ class UnrealConnection:
                 "status": "error",
                 "error": str(e)
             }
+    
+    def send_command_with(self, command: Union[str, BaseCommand], params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """
+        Send a command to Unreal Engine using either string or BaseCommand object.
+        
+        Args:
+            command: Either a string command type or a BaseCommand object
+            params: Optional parameters dictionary (used only with string commands)
+            
+        Returns:
+            Optional[Dict[str, Any]]: Response from Unreal Engine or None on failure
+        """
+        # Task 3.3: Command object type check and processing logic
+        if isinstance(command, BaseCommand):
+            # Serialize BaseCommand directly and send via socket
+            # Always reconnect for each command, since Unreal closes the connection after each command
+            if self.socket:
+                try:
+                    self.socket.close()
+                except:
+                    pass
+                self.socket = None
+                self.connected = False
+            
+            if not self.connect():
+                logger.error("Failed to connect to Unreal Engine for command")
+                return None
+            
+            try:
+                # Serialize the command object directly
+                command_json = command.to_json()
+                logger.info(f"Sending command: {command_json}")
+                self.socket.sendall(command_json.encode('utf-8'))
+                
+                # Read response using improved handler
+                response_data = self.receive_full_response(self.socket)
+                response = json.loads(response_data.decode('utf-8'))
+                
+                # Log complete response for debugging
+                logger.info(f"Complete response from Unreal: {response}")
+                
+                # Check for both error formats: {"status": "error", ...} and {"success": false, ...}
+                if response.get("status") == "error":
+                    error_message = response.get("error") or response.get("message", "Unknown Unreal error")
+                    logger.error(f"Unreal error (status=error): {error_message}")
+                    # We want to preserve the original error structure but ensure error is accessible
+                    if "error" not in response:
+                        response["error"] = error_message
+                elif response.get("success") is False:
+                    # This format uses {"success": false, "error": "message"} or {"success": false, "message": "message"}
+                    error_message = response.get("error") or response.get("message", "Unknown Unreal error")
+                    logger.error(f"Unreal error (success=false): {error_message}")
+                    # Convert to the standard format expected by higher layers
+                    response = {
+                        "status": "error",
+                        "error": error_message
+                    }
+                
+                # Always close the connection after command is complete
+                # since Unreal will close it on its side anyway
+                try:
+                    self.socket.close()
+                except:
+                    pass
+                self.socket = None
+                self.connected = False
+                
+                return response
+                
+            except Exception as e:
+                logger.error(f"Error sending command: {e}")
+                # Always reset connection state on any error
+                self.connected = False
+                try:
+                    self.socket.close()
+                except:
+                    pass
+                self.socket = None
+                return {
+                    "status": "error",
+                    "error": str(e)
+                }
+        
+        # Task 3.4: String command processing logic
+        else:
+            # command is a string, use params or empty dict
+            if params is None:
+                params = {}
+            return self.send_command(command, params)
 
 # Global connection state
 _unreal_connection: UnrealConnection = None

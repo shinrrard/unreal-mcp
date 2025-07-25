@@ -5,8 +5,12 @@ This module provides tools for creating and manipulating Blueprint assets in Unr
 """
 
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Union
 from mcp.server.fastmcp import FastMCP, Context
+
+# Import Command classes
+from commands.blueprint_commands import CreateBlueprintCommand
+from commands.base_command import BaseCommand
 
 # Get logger
 logger = logging.getLogger("UnrealMCP")
@@ -29,11 +33,15 @@ def register_blueprint_tools(mcp: FastMCP):
             if not unreal:
                 logger.error("Failed to connect to Unreal Engine")
                 return {"success": False, "message": "Failed to connect to Unreal Engine"}
-                
-            response = unreal.send_command("create_blueprint", {
-                "name": name,
-                "parent_class": parent_class
-            })
+            
+            # Create Command object using Task 1's CreateBlueprintCommand
+            create_cmd = CreateBlueprintCommand(
+                name=name,
+                parent_class=parent_class
+            )
+            
+            # Use Task 3's send_command_with method
+            response = unreal.send_command_with(create_cmd)
             
             if not response:
                 logger.error("No response from Unreal Engine")
